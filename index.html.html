@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <!-- Chosen Palette: Industrial Modern Blue & Slate Gray -->
+    <!-- Application Structure Plan: Uygulama 5 ana modülden oluşmaktadır: 1. Firebase Canlı Bağlantı Ayarları, 2. Yükleme Bilgileri (Firma/Plaka/Temsilci), 3. Yüklenen Ürün Girişi ve Anlık Tablo, 4. Birleştirilmiş Özet ve Onay Ekranı, 5. Fotoğraf/Fiş Yükleme ve Gerçek Zamanlı (Real-time Firestore) Sevkiyat Arşivi. Tüm cihazlarda canlı senkronizasyon için Firebase Firestore 'onSnapshot' dinleyicisi entegre edilmiştir. -->
+    <!-- Visualization & Content Choices: Grafik nesneleri ve Mermaid kullanılmamıştır. Görseller canlı veritabanı boyut limitlerini (Firestore 1MB) aşmamak için HTML Canvas üzerinde anlık sıkıştırılarak base64 biçiminde Firestore'a aktarılır. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sevkiyat ve Yükleme Takip Sistemi (Canlı Firebase)</title>
+    
+    <!-- Firebase Web SDK (Compat - CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --success: #16a34a;
+            --warning: #d97706;
+            --danger: #dc2626;
+            --danger-dark: #b91c1c;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+            --border: #cbd5e1;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background: var(--bg); color: var(--text); padding: 15px; }
+        .container { max-width: 950px; margin: 0 auto; background: var(--card-bg); padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        
+        /* HEADER & CANLI BAĞLANTI DURUMU */
+        .app-header { display: flex; justify-content: space-between; align-items: center; border-b: 2px solid #e2e8f0; padding-bottom: 12px; margin-bottom: 20px; flex-wrap: wrap; gap: 10px; }
+        .app-title { color: var(--primary); font-size: 1.4rem; font-weight: bold; }
+        .status-badge { padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; display: inline-flex; align-items: center; gap: 6px; }
+        .status-online { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        .status-offline { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
+
+        .section-box { background: #f8fafc; border: 1px solid var(--border); padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+        .section-box h3 { color: var(--primary-dark); margin-bottom: 12px; font-size: 1.1rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; }
+
+        form { display: flex; flex-direction: column; gap: 12px; }
+        label { font-weight: 600; font-size: 0.9rem; margin-bottom: 3px; display: block; }
+        input, select { width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; outline: none; transition: border-color 0.2s; background: white; }
+        input:focus, select:focus { border-color: var(--primary); }
+
+        /* Sayı inputlarındaki okları tamamen kaldıran CSS */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type=number] { -moz-appearance: textfield; }
+
+        .btn { padding: 10px 15px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.2s; text-align: center; display: inline-block; text-decoration: none; }
+        .btn-primary { background: var(--primary); color: white; width: 100%; }
+        .btn-primary:hover { background: var(--primary-dark); }
+        .btn-secondary { background: #e2e8f0; color: #475569; }
+        .btn-secondary:hover { background: #cbd5e1; }
+        .btn-success { background: var(--success); color: white; width: 100%; font-size: 1.1rem; padding: 14px; }
+        .btn-success:hover { background: #15803d; }
+        .btn-warning { background: var(--warning); color: white; }
+        .btn-warning:hover { background: #b45309; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:hover { background: var(--danger-dark); }
+        .btn-camera { background: #0284c7; color: white; }
+        .btn-camera:hover { background: #0369a1; }
+        .btn-file { background: #475569; color: white; }
+        .btn-file:hover { background: #334155; }
+        .btn-config { background: #0f172a; color: white; font-size: 0.85rem; padding: 6px 12px; }
+
+        /* Tablolar */
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 10px; }
+        th, td { border: 1px solid var(--border); padding: 8px; text-align: left; font-size: 0.9rem; }
+        th { background: #f1f5f9; }
+
+        .table-responsive { width: 100%; overflow-x: auto; margin-top: 10px; }
+        .history-table { width: 100%; border-collapse: collapse; background: white; white-space: nowrap; }
+        .history-table th { background: #1e293b; color: white; padding: 10px; font-size: 0.85rem; text-align: left; }
+        .history-table td { padding: 9px 10px; font-size: 0.85rem; border-bottom: 1px solid #e2e8f0; color: #334155; }
+        .history-table tr:hover { background: #f8fafc; }
+
+        /* Fotoğraf Önizleme */
+        .photo-grid { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+        .photo-thumb { width: 80px; height: 80px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; transition: transform 0.2s; }
+        .photo-thumb:hover { transform: scale(1.05); }
+
+        /* MODAL (POP-UP) STİLLERİ */
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; justify-content: center; align-items: center; z-index: 9999; backdrop-filter: blur(3px); }
+        .modal-box { background: white; padding: 25px; border-radius: 12px; width: 90%; max-width: 500px; text-align: center; box-shadow: 0 10px 25px rgba(0,0,0,0.2); animation: scaleUp 0.2s ease-in-out; max-height: 90vh; overflow-y: auto; }
+        @keyframes scaleUp { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        
+        .alert-icon { font-size: 2.8rem; margin-bottom: 8px; }
+        .alert-title { font-size: 1.2rem; font-weight: bold; color: var(--text); margin-bottom: 8px; }
+        .alert-message { font-size: 0.95rem; color: #475569; margin-bottom: 20px; line-height: 1.4; text-align: left; }
+        .alert-buttons { display: flex; gap: 10px; }
+
+        /* YAZDIRMA ALANI */
+        #printArea { display: none; }
+
+        @media print {
+            body * { display: none !important; }
+            #printArea, #printArea * { display: block !important; }
+            #printArea { width: 100%; padding: 20px; background: white; color: black; font-size: 14px; }
+            #printArea table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+            #printArea th, #printArea td { border: 1px solid #000; padding: 8px; text-align: left; }
+            #printArea th { background: #eee !important; -webkit-print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- UYARI / ONAY PENCERESİ -->
+<div id="customAlertOverlay" class="overlay">
+    <div class="modal-box">
+        <div class="alert-icon" id="customAlertIcon">⚠️</div>
+        <div class="alert-title" id="customAlertTitle">Dikkat!</div>
+        <div class="alert-message" id="customAlertText">Uyarı mesajı burada yer alacak.</div>
+        <div id="alertButtonContainer">
+            <button type="button" class="btn btn-primary" onclick="uyariyiKapat()" style="width: 100%;">Tamam</button>
+        </div>
+    </div>
+</div>
+
+<!-- FIREBASE KONFİGÜRASYON MODALI -->
+<div id="firebaseConfigOverlay" class="overlay">
+    <div class="modal-box" style="text-align: left;">
+        <h3 style="color: var(--primary); margin-bottom: 10px;">🔥 Firebase Canlı Veritabanı Ayarları</h3>
+        <p style="font-size: 0.85rem; color: #64748b; margin-bottom: 15px;">
+            Firebase Konsolunuzdan (console.firebase.google.com) aldığınız SDK konfigürasyon bilgilerini buraya yapıştırın. Bu bilgiler tarayıcınıza güvenle kaydedilir.
+        </p>
+        <form id="firebaseConfigForm" onsubmit="firebaseAyarlariniKaydet(event)">
+            <div>
+                <label style="font-size: 0.8rem;">apiKey:</label>
+                <input type="text" id="fb_apiKey" placeholder="AIzaSy..." required>
+            </div>
+            <div>
+                <label style="font-size: 0.8rem;">authDomain:</label>
+                <input type="text" id="fb_authDomain" placeholder="proje-id.firebaseapp.com" required>
+            </div>
+            <div>
+                <label style="font-size: 0.8rem;">projectId:</label>
+                <input type="text" id="fb_projectId" placeholder="proje-id" required>
+            </div>
+            <div>
+                <label style="font-size: 0.8rem;">storageBucket:</label>
+                <input type="text" id="fb_storageBucket" placeholder="proje-id.appspot.com" required>
+            </div>
+            <div>
+                <label style="font-size: 0.8rem;">messagingSenderId:</label>
+                <input type="text" id="fb_messagingSenderId" placeholder="123456789" required>
+            </div>
+            <div>
+                <label style="font-size: 0.8rem;">appId:</label>
+                <input type="text" id="fb_appId" placeholder="1:123456789:web:abc..." required>
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="modalKapat('firebaseConfigOverlay')">İptal</button>
+                <button type="submit" class="btn btn-primary">Kaydet & Bağlan</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- GİTHUB REHBERİ MODALI -->
+<div id="githubGuideOverlay" class="overlay">
+    <div class="modal-box" style="text-align: left; max-width: 600px;">
+        <h3 style="color: var(--primary); margin-bottom: 10px;">🌐 GitHub Pages İle Web Sitesi Yapma Rehberi</h3>
+        <div style="font-size: 0.9rem; color: #334155; line-height: 1.6;">
+            <ol style="margin-left: 20px; display: flex; flex-direction: column; gap: 10px;">
+                <li><strong>GitHub Hesabı Açın:</strong> <a href="https://github.com" target="_blank" style="color: var(--primary);">github.com</a> adresine gidin ve ücretsiz hesap oluşturun.</li>
+                <li><strong>Yeni Depo (Repository) Oluşturun:</strong> Sağ üstteki <strong>"+"</strong> ikonuna tıklayıp <strong>"New repository"</strong> seçeneğini seçin. Depo adını örn: <code>sevkiyat-takip</code> yapın ve Public işaretleyin.</li>
+                <li><strong>Dosyayı Yükleyin:</strong> Bu HTML kodunu bilgisayarınıza <code>index.html</code> adıyla kaydedin. GitHub deposu içinde <strong>"uploading an existing file"</strong> linkine basarak <code>index.html</code> dosyasını yükleyin ve "Commit changes" butonuna basın.</li>
+                <li><strong>Yayınlayın (Pages):</strong> Deponuzun <strong>Settings</strong> > <strong>Pages</strong> sekmesine gidin. <em>Branch</em> kısmını <code>main</code> veya <code>master</code> seçip <strong>Save</strong> butonuna basın.</li>
+                <li><strong>Ortak Adresiniz Hazır!</strong> 1-2 dakika içinde size verilen <code>https://kullaniciadi.github.io/sevkiyat-takip/</code> adresiyle tüm çalışanlarınız projeye erişebilir!</li>
+            </ol>
+        </div>
+        <button type="button" class="btn btn-primary" style="margin-top: 20px;" onclick="modalKapat('githubGuideOverlay')">Anladım, Kapat</button>
+    </div>
+</div>
+
+<!-- GİZLİ YAZDIRMA ALANI -->
+<div id="printArea">
+    <h2 style="text-align: center; margin-bottom: 15px;">SEVKİYAT VE YÜKLEME ÖZETİ</h2>
+    <div id="printHeaderInfo" style="margin-bottom: 15px; line-height: 1.5;"></div>
+    <h3>Ürün Detayları</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Ürün İsmi / Cinsi ve Ölçüler</th>
+                <th style="width: 150px; text-align: right;">Toplam Ağırlık (kg)</th>
+            </tr>
+        </thead>
+        <tbody id="printUrunTbody"></tbody>
+    </table>
+    <div id="printFooterInfo" style="margin-top: 15px; font-weight: bold;"></div>
+</div>
+
+<div class="container">
+    <!-- ANA BAŞLIK & DURUM BİLGİSİ -->
+    <div class="app-header">
+        <div>
+            <div class="app-title">🚛 Sevkiyat Takip Sistemi</div>
+            <div style="font-size: 0.8rem; color: #64748b;">Canlı Veritabanı ve Senkronize Yükleme Paneli</div>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <div id="connectionStatusBadge" class="status-badge status-offline">
+                <span id="statusDot">🔴</span> <span id="statusText">Çevrimdışı (Yerel Mod)</span>
+            </div>
+            <button type="button" class="btn btn-config" onclick="modalAc('firebaseConfigOverlay')">🔥 Firebase Ayarı</button>
+        </div>
+    </div>
+
+    <!-- 1. ADIM: YÜKLEME BİLGİLERİ -->
+    <div class="section-box">
+        <h3>1. Yükleme Bilgileri</h3>
+        <form id="form-step1" onsubmit="return false;">
+            <div>
+                <label>Müşteri Firma Adı:</label>
+                <input type="text" id="firmaAdi" required placeholder="Örn: Çelik Sanayi Tic." oninput="bilgileriGuncelle()">
+            </div>
+            <div>
+                <label>Araç Plakası:</label>
+                <input type="text" id="plaka" required placeholder="Örn: 01 ABC 34" oninput="bilgileriGuncelle()">
+            </div>
+            <div>
+                <label>İlgilenen Müşteri Temsilcisi:</label>
+                <select id="temsilciSecim" onchange="temsilciDegisti()">
+                    <option value="">-- Temsilci Seçin --</option>
+                    <option value="AYFER HANIM">AYFER HANIM</option>
+                    <option value="NAZİRE HANIM">NAZİRE HANIM</option>
+                    <option value="HİLAL HANIM">HİLAL HANIM</option>
+                    <option value="SENEM HANIM">SENEM HANIM</option>
+                    <option value="HASAN BEY">HASAN BEY</option>
+                    <option value="EMRE BEY">EMRE BEY</option>
+                    <option value="DIĞER">DİĞER / METİN GİR</option>
+                </select>
+            </div>
+            <div id="manuelTemsilciKutusu" style="display: none;">
+                <label>Temsilci Adını Yazın:</label>
+                <input type="text" id="manuelTemsilci" placeholder="İsim girin..." oninput="bilgileriGuncelle()">
+            </div>
+        </form>
+    </div>
+
+    <!-- 2. ADIM: YÜKLENEN ÜRÜN BİLGİLERİ -->
+    <div class="section-box">
+        <h3>2. Yüklenen Ürünler</h3>
+        <form id="form-step2" onsubmit="urunEkle(event)">
+            <div>
+                <label>Ürün İsmi / Cinsi:</label>
+                <select id="urunSecim" onchange="urunTuruDegisti()" required>
+                    <option value="">-- Ürün Seçin --</option>
+                    <option value="DİLME SAC">DİLME SAC</option>
+                    <option value="85LİK DİKME">85LİK DİKME</option>
+                    <option value="110LUK DİKME">110LUK DİKME</option>
+                    <option value="160LIK DİKME">160LIK DİKME</option>
+                    <option value="139 LUK BORU">139 LUK BORU</option>
+                    <option value="102 LİK SEKİZGEN">102 LİK SEKİZGEN</option>
+                    <option value="ÇELİK ETEK">ÇELİK ETEK</option>
+                    <option value="BOY KESME">BOY KESME</option>
+                    <option value="FASON SAC DİLME İŞÇİLİĞİ">FASON SAC DİLME İŞÇİLİĞİ</option>
+                    <option value="BAYRAK SACI">BAYRAK SACI</option>
+                    <option value="DIGER">DİĞER / METİN GİR</option>
+                </select>
+            </div>
+            <div id="manuelUrunKutusu" style="display: none;">
+                <label>Ürün Adını Yazın:</label>
+                <input type="text" id="manuelUrun" placeholder="Ürün ismi yazın...">
+            </div>
+            <div>
+                <label id="labelEn">En (mm):</label>
+                <input type="text" inputmode="decimal" id="urunEn" placeholder="Örn: 1250">
+            </div>
+            <div>
+                <label id="labelKalinlik">Kalınlık (mm):</label>
+                <input type="text" inputmode="decimal" id="urunKalinlik" placeholder="Örn: 0.55">
+            </div>
+            <div>
+                <label>Ağırlık (kg):</label>
+                <input type="text" inputmode="decimal" id="urunKilo" required placeholder="Örn: 550">
+            </div>
+            <button type="submit" class="btn btn-secondary" style="margin-top: 5px;">+ Ürünü Listeye Ekle</button>
+        </form>
+
+        <div style="margin-top: 15px;">
+            <label>Eklenen Ürünler:</label>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ürün İsmi</th>
+                        <th>Ölçüler (En x Kalınlık)</th>
+                        <th>Kilo (kg)</th>
+                        <th>İşlem</th>
+                    </tr>
+                </thead>
+                <tbody id="anlikUrunListesi">
+                    <tr><td colspan="4" style="text-align: center; color: #64748b;">Henüz ürün eklenmedi</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 3. ADIM: ONAY VE KONTROL EKRANI -->
+    <div class="section-box" id="bolum-ozet">
+        <h3>3. Onay ve Özet Ekranı</h3>
+        <div style="margin-bottom: 10px; font-size: 0.95rem;">
+            <p><strong>Müşteri Firma:</strong> <span id="conf-firma">-</span></p>
+            <p><strong>Araç Plakası:</strong> <span id="conf-plaka">-</span></p>
+            <p><strong>Müşteri Temsilcisi:</strong> <span id="conf-temsilci">-</span></p>
+        </div>
+
+        <label>Birleştirilmiş Ürün Özeti:</label>
+        <div class="table-responsive">
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Ürün Cinsi</th>
+                        <th>En</th>
+                        <th>Kalınlık</th>
+                        <th>Parça Sayısı</th>
+                        <th>Toplam Ağırlık</th>
+                    </tr>
+                </thead>
+                <tbody id="ozetUrunListesi">
+                    <tr><td colspan="5" style="text-align: center; color: #64748b; background: white;">Ürün bekleniyor...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div style="background: #e2e8f0; padding: 10px; border-radius: 6px; font-weight: bold; font-size: 0.95rem; margin-top: 12px; margin-bottom: 12px;">
+            <p>TOPLAM PARÇA: <span id="toplamParcaSayisi">0</span> Adet</p>
+            <p>TOPLAM KİLO: <span id="toplamKiloMiktari">0</span> kg</p>
+        </div>
+        
+        <div style="display: flex; gap: 10px;">
+            <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="aktifYazdirTikla()">Yazdır / Çıktı Al</button>
+            <button type="button" class="btn btn-warning" style="flex: 1;" onclick="listeyiOnaylaSoruSor()">Listeyi Onaylıyorum</button>
+        </div>
+        <div id="onayMesaji" style="margin-top: 8px; font-size: 0.9rem; font-weight: bold; text-align: center; display: none;"></div>
+    </div>
+
+    <!-- 4. ADIM: ARAÇ FOTOĞRAFI VE KANTAR FİŞİ -->
+    <div class="section-box">
+        <h3>4. Araç Fotoğrafı ve Kantar Fişi</h3>
+        <p style="font-size: 0.9rem; color: #64748b; margin-bottom: 10px;">Yükleme için en az 1 adet fotoğraf çekmeli veya dosyadan seçmelisin:</p>
+        
+        <input type="file" id="kameraInput" accept="image/*" capture="environment" multiple style="display: none;" onchange="dosyaSecildi(this)">
+        <input type="file" id="dosyaInput" accept="image/*" multiple style="display: none;" onchange="dosyaSecildi(this)">
+
+        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <button type="button" class="btn btn-camera" style="flex: 1;" onclick="document.getElementById('kameraInput').click()">
+                📸 Fotoğraf Çek
+            </button>
+            <button type="button" class="btn btn-file" style="flex: 1;" onclick="document.getElementById('dosyaInput').click()">
+                📁 Dosya / Galeri Yükle
+            </button>
+        </div>
+
+        <div id="secilenDosyalarAlani" style="background: #f1f5f9; padding: 10px; border-radius: 6px; font-size: 0.9rem; display: none;">
+            <strong>Seçilen Dosyalar:</strong>
+            <ul id="dosyaListesiUl" style="margin-top: 5px; margin-left: 20px; color: #334155;"></ul>
+        </div>
+    </div>
+
+    <!-- BİTİR / KAYDET BUTONU -->
+    <button type="button" class="btn btn-success" id="btnKaydet" onclick="yuklemeyiBitir()">Yüklemeyi Bitir ve Canlı Kaydet</button>
+
+    <!-- 5. ADIM: GEÇMİŞ RAPORLAR VE CANLI LİSTE -->
+    <div class="section-box" style="margin-top: 25px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; flex-wrap: wrap; gap: 10px;">
+            <h3 style="margin: 0; border: none; padding: 0;">5. Günlük Sevkiyat ve Geçmiş Raporlar</h3>
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="background: #e2e8f0; padding: 5px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; color: #1e293b;">
+                    GENEL TOPLAM: <span id="genelToplamKiloYazi">0</span> kg
+                </div>
+                <button type="button" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.85rem;" onclick="sevkiyatlarıTemizleSorusu()">Tümünü Temizle</button>
+            </div>
+        </div>
+
+        <div id="gecmisListesiContainer" style="margin-top: 10px;">
+            <p style='color:#64748b; font-size:0.9rem;'>Kayıtlar yükleniyor...</p>
+        </div>
+
+        <div id="detayGorunum" style="display:none; background: #ffffff; border: 1px solid var(--border); padding: 12px; border-radius: 8px; margin-top: 15px;">
+            <h4>Sevkiyat Detayı ve Fotoğraflar</h4>
+            <div id="detayIcerik"></div>
+            <button type="button" class="btn btn-secondary" style="margin-top: 10px; width: 100%;" onclick="detayiKapat()">Detayları Kapat</button>
+        </div>
+    </div>
+
+    <!-- GİTHUB YAYINLAMA REHBERİ BÖLÜMÜ -->
+    <div style="text-align: center; margin-top: 20px; padding: 15px; background: #e0f2fe; border-radius: 8px; border: 1px solid #bae6fd;">
+        <span style="font-weight: bold; color: #0369a1;">🌐 Bu Uygulamayı Ortak İnternet Adresinde Yayınlamak İster misiniz?</span>
+        <button type="button" class="btn btn-primary" style="width: auto; margin-left: 10px; padding: 6px 12px; font-size: 0.85rem;" onclick="modalAc('githubGuideOverlay')">GitHub İle Yayınlama Rehberi</button>
+    </div>
+
+</div>
+
+<script>
+    // GLOBAL DURUM VE DEĞİŞKENLER
+    let db = null; // Firebase Firestore referansı
+    let isFirebaseActive = false;
+    let canlıGecmisVeri = [];
+
+    let aktifSevkiyat = {
+        firma: "",
+        plaka: "",
+        temsilci: "",
+        urunler: [],
+        fotolar: [], 
+        tarih: "",
+        onaylandiMi: false
+    };
+
+    let secilenDosyaObjeleri = [];
+
+    // UYGULAMA BAŞLANGICI
+    window.addEventListener('DOMContentLoaded', () => {
+        firebaseBaslat();
+        kayitliConfigFormaDoldur();
+    });
+
+    // FIREBASE BAŞLATMA VE REAL-TIME DİNLEYİCİ
+    function firebaseBaslat() {
+        const savedConfig = localStorage.getItem('firebase_config_data');
+        if (savedConfig) {
+            try {
+                const config = JSON.parse(savedConfig);
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(config);
+                }
+                db = firebase.firestore();
+                isFirebaseActive = true;
+                
+                // Durum Rozetini Güncelle
+                const badge = document.getElementById('connectionStatusBadge');
+                badge.className = "status-badge status-online";
+                document.getElementById('statusDot').innerText = "🟢";
+                document.getElementById('statusText').innerText = "Firebase Canlı Bağlandı";
+
+                // CANLI FİRESTORE DİNLEYİCİSİ (onSnapshot)
+                db.collection("sevkiyatGecmisi").orderBy("timestamp", "desc").onSnapshot((snapshot) => {
+                    canlıGecmisVeri = [];
+                    snapshot.forEach((doc) => {
+                        let item = doc.data();
+                        item.docId = doc.id;
+                        canlıGecmisVeri.push(item);
+                    });
+                    gecmisRaporlariEkranaBas(canlıGecmisVeri);
+                }, (error) => {
+                    console.error("Firestore Hatası:", error);
+                    gosterUyari("Firebase canlı veri okuma hatası: " + error.message);
+                    offlineModaGec();
+                });
+
+            } catch (e) {
+                console.error("Firebase Kurulum Hatası:", e);
+                offlineModaGec();
+            }
+        } else {
+            offlineModaGec();
+        }
+    }
+
+    function offlineModaGec() {
+        isFirebaseActive = false;
+        const badge = document.getElementById('connectionStatusBadge');
+        badge.className = "status-badge status-offline";
+        document.getElementById('statusDot').innerText = "🔴";
+        document.getElementById('statusText').innerText = "Çevrimdışı (Yerel Mod)";
+
+        // LocalStorage'dan yükle
+        let localData = JSON.parse(localStorage.getItem('sevkiyatGecmisi') || '[]');
+        canlıGecmisVeri = localData;
+        gecmisRaporlariEkranaBas(canlıGecmisVeri);
+    }
+
+    function firebaseAyarlariniKaydet(e) {
+        e.preventDefault();
+        const config = {
+            apiKey: document.getElementById('fb_apiKey').value.trim(),
+            authDomain: document.getElementById('fb_authDomain').value.trim(),
+            projectId: document.getElementById('fb_projectId').value.trim(),
+            storageBucket: document.getElementById('fb_storageBucket').value.trim(),
+            messagingSenderId: document.getElementById('fb_messagingSenderId').value.trim(),
+            appId: document.getElementById('fb_appId').value.trim()
+        };
+
+        localStorage.setItem('firebase_config_data', JSON.stringify(config));
+        modalKapat('firebaseConfigOverlay');
+        gosterUyari("Firebase ayarları kaydedildi. Sayfa yenileniyor...", "Başarılı");
+        setTimeout(() => { location.reload(); }, 1200);
+    }
+
+    function kayitliConfigFormaDoldur() {
+        const savedConfig = localStorage.getItem('firebase_config_data');
+        if (savedConfig) {
+            const config = JSON.parse(savedConfig);
+            document.getElementById('fb_apiKey').value = config.apiKey || "";
+            document.getElementById('fb_authDomain').value = config.authDomain || "";
+            document.getElementById('fb_projectId').value = config.projectId || "";
+            document.getElementById('fb_storageBucket').value = config.storageBucket || "";
+            document.getElementById('fb_messagingSenderId').value = config.messagingSenderId || "";
+            document.getElementById('fb_appId').value = config.appId || "";
+        }
+    }
+
+    // GÖRSEL SIKIŞTIRMA (CANVAS) - Firestore Doc Limit Sınırı İçin (Max 800px)
+    function dosyaSecildi(input) {
+        if (input.files && input.files.length > 0) {
+            Array.from(input.files).forEach(file => {
+                gorselSikistirVeEkle(file);
+            });
+        }
+        input.value = "";
+    }
+
+    function gorselSikistirVeEkle(file) {
+        let reader = new FileReader();
+        reader.onload = function(e) {
+            let img = new Image();
+            img.onload = function() {
+                let canvas = document.createElement('canvas');
+                let max_size = 800; // Maksimum genişlik/yükseklik px
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > max_size) {
+                        height *= max_size / width;
+                        width = max_size;
+                    }
+                } else {
+                    if (height > max_size) {
+                        width *= max_size / height;
+                        height = max_size;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                let ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, width, height);
+
+                // JPEG olarak %60 kalitede sıkıştır
+                let dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+                secilenDosyaObjeleri.push({ name: file.name, dataUrl: dataUrl });
+                dosyaListesiniGuncelle();
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function dosyaListesiniGuncelle() {
+        let alan = document.getElementById('secilenDosyalarAlani');
+        let ul = document.getElementById('dosyaListesiUl');
+        ul.innerHTML = "";
+
+        if (secilenDosyaObjeleri.length > 0) {
+            alan.style.display = "block";
+            secilenDosyaObjeleri.forEach((dosya, idx) => {
+                ul.innerHTML += `<li>${dosya.name} <button type="button" onclick="dosyaSil(${idx})" style="color:red; border:none; background:none; cursor:pointer; font-weight:bold; margin-left:5px;">[Kaldır]</button></li>`;
+            });
+        } else {
+            alan.style.display = "none";
+        }
+    }
+
+    function dosyaSil(idx) {
+        secilenDosyaObjeleri.splice(idx, 1);
+        dosyaListesiniGuncelle();
+    }
+
+    // YARDIMCI PENCERELER
+    function modalAc(id) { document.getElementById(id).style.display = 'flex'; }
+    function modalKapat(id) { document.getElementById(id).style.display = 'none'; }
+
+    function gosterUyari(mesaj, baslik = "Dikkat!") {
+        document.getElementById('customAlertTitle').innerText = baslik;
+        document.getElementById('customAlertText').innerText = mesaj;
+        document.getElementById('alertButtonContainer').innerHTML = `
+            <button type="button" class="btn btn-primary" onclick="uyariyiKapat()" style="width: 100%;">Tamam</button>
+        `;
+        document.getElementById('customAlertOverlay').style.display = 'flex';
+    }
+
+    let globalOnayCallback = null;
+    function gosterOnaySoru(mesaj, callback, btnRenk = "btn-warning", btnMetin = "Evet, Onaylıyorum") {
+        globalOnayCallback = callback;
+        document.getElementById('customAlertTitle').innerText = "Son Kontrol";
+        document.getElementById('customAlertText').innerText = mesaj;
+        document.getElementById('alertButtonContainer').innerHTML = `
+            <div class="alert-buttons">
+                <button type="button" class="btn btn-secondary" style="flex: 1;" onclick="onayIPtalsizKapat(false)">İptal</button>
+                <button type="button" class="btn ${btnRenk}" style="flex: 1;" onclick="onayIPtalsizKapat(true)">${btnMetin}</button>
+            </div>
+        `;
+        document.getElementById('customAlertOverlay').style.display = 'flex';
+    }
+
+    function onayIPtalsizKapat(sonuc) {
+        document.getElementById('customAlertOverlay').style.display = 'none';
+        if(globalOnayCallback) {
+            globalOnayCallback(sonuc);
+            globalOnayCallback = null;
+        }
+    }
+
+    function uyariyiKapat() { document.getElementById('customAlertOverlay').style.display = 'none'; }
+
+    // FORM VE LİSTE MANTIĞI
+    function temsilciDegisti() {
+        let secim = document.getElementById('temsilciSecim').value;
+        let manuelKutu = document.getElementById('manuelTemsilciKutusu');
+        
+        if(secim === "DIĞER") {
+            manuelKutu.style.display = "block";
+            document.getElementById('manuelTemsilci').value = "";
+            document.getElementById('manuelTemsilci').focus();
+        } else {
+            manuelKutu.style.display = "none";
+            document.getElementById('manuelTemsilci').value = "";
+        }
+        bilgileriGuncelle();
+    }
+
+    function urunTuruDegisti() {
+        let secim = document.getElementById('urunSecim').value;
+        let manuelKutu = document.getElementById('manuelUrunKutusu');
+        let labelEn = document.getElementById('labelEn');
+        let labelKalinlik = document.getElementById('labelKalinlik');
+
+        if(secim === "DIGER") {
+            manuelKutu.style.display = "block";
+            document.getElementById('manuelUrun').value = "";
+            document.getElementById('manuelUrun').focus();
+        } else {
+            manuelKutu.style.display = "none";
+            document.getElementById('manuelUrun').value = "";
+        }
+
+        if(secim === "DİLME SAC") {
+            labelEn.innerHTML = "En (mm): <span style='color:red;'>*</span>";
+            labelKalinlik.innerHTML = "Kalınlık (mm): <span style='color:red;'>*</span>";
+        } else if(secim === "BOY KESME") {
+            labelEn.innerHTML = "En (mm):";
+            labelKalinlik.innerHTML = "Kalınlık (mm): <span style='color:red;'>*</span>";
+        } else {
+            labelEn.innerHTML = "En (mm):";
+            labelKalinlik.innerHTML = "Kalınlık (mm):";
+        }
+    }
+
+    function bilgileriGuncelle() {
+        aktifSevkiyat.firma = document.getElementById('firmaAdi').value.trim();
+        aktifSevkiyat.plaka = document.getElementById('plaka').value.trim();
+        
+        let secim = document.getElementById('temsilciSecim').value;
+        if(secim === "DIĞER") {
+            aktifSevkiyat.temsilci = document.getElementById('manuelTemsilci').value.trim();
+        } else {
+            aktifSevkiyat.temsilci = secim;
+        }
+
+        document.getElementById('conf-firma').innerText = aktifSevkiyat.firma || "-";
+        document.getElementById('conf-plaka').innerText = aktifSevkiyat.plaka || "-";
+        document.getElementById('conf-temsilci').innerText = aktifSevkiyat.temsilci || "-";
+    }
+
+    function urunEkle(e) {
+        e.preventDefault();
+        let urunSecim = document.getElementById('urunSecim').value;
+        let isim = "";
+
+        if(!urunSecim) {
+            gosterUyari("Lütfen bir ürün seçin!");
+            return;
+        }
+
+        if(urunSecim === "DIGER") {
+            isim = document.getElementById('manuelUrun').value.trim();
+            if(!isim) {
+                gosterUyari("Lütfen ürün adını yazın!");
+                return;
+            }
+        } else {
+            isim = urunSecim;
+        }
+
+        let enStr = document.getElementById('urunEn').value.trim().replace(',', '.');
+        let kalinlikStr = document.getElementById('urunKalinlik').value.trim().replace(',', '.');
+        let kiloStr = document.getElementById('urunKilo').value.trim().replace(',', '.');
+
+        if(urunSecim === "DİLME SAC") {
+            if(!enStr || !kalinlikStr) {
+                gosterUyari("Dilme sac için En ve Kalınlık alanları zorunludur!");
+                return;
+            }
+        } else if(urunSecim === "BOY KESME") {
+            if(!kalinlikStr) {
+                gosterUyari("Boy kesme için Kalınlık alanı zorunludur!");
+                return;
+            }
+        }
+
+        let kilo = parseFloat(kiloStr);
+        if(isNaN(kilo)) {
+            gosterUyari("Lütfen geçerli bir ağırlık (kilo) girin!");
+            return;
+        }
+
+        aktifSevkiyat.urunler.push({
+            isim: isim,
+            en: enStr ? enStr + " mm" : "-",
+            kalinlik: kalinlikStr ? kalinlikStr + " mm" : "-",
+            kilo: kilo
+        });
+
+        aktifSevkiyat.onaylandiMi = false;
+        document.getElementById('onayMesaji').style.display = 'none';
+
+        document.getElementById('urunEn').value = "";
+        document.getElementById('urunKalinlik').value = "";
+        document.getElementById('urunKilo').value = "";
+        document.getElementById('urunSecim').value = "";
+        document.getElementById('manuelUrunKutusu').style.display = "none";
+        document.getElementById('labelEn').innerText = "En (mm):";
+        document.getElementById('labelKalinlik').innerText = "Kalınlık (mm):";
+        document.getElementById('urunSecim').focus();
+
+        listeleriGuncelle();
+    }
+
+    function urunSil(index) {
+        aktifSevkiyat.urunler.splice(index, 1);
+        aktifSevkiyat.onaylandiMi = false;
+        document.getElementById('onayMesaji').style.display = 'none';
+        listeleriGuncelle();
+    }
+
+    function listeleriGuncelle() {
+        let tbody = document.getElementById('anlikUrunListesi');
+        if(aktifSevkiyat.urunler.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: #64748b;">Henüz ürün eklenmedi</td></tr>`;
+        } else {
+            tbody.innerHTML = "";
+            aktifSevkiyat.urunler.forEach((u, index) => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${u.isim}</td>
+                        <td>${u.en} / ${u.kalinlik}</td>
+                        <td>${u.kilo.toLocaleString()} kg</td>
+                        <td><button type="button" class="btn btn-secondary" style="padding:2px 6px; font-size:0.8rem;" onclick="urunSil(${index})">Sil</button></td>
+                    </tr>
+                `;
+            });
+        }
+
+        let gruplanmis = {};
+        aktifSevkiyat.urunler.forEach(u => {
+            let key = u.isim + "_" + u.en + "_" + u.kalinlik;
+            if(!gruplanmis[key]) {
+                gruplanmis[key] = { isim: u.isim, en: u.en, kalinlik: u.kalinlik, adet: 0, toplamKilo: 0 };
+            }
+            gruplanmis[key].adet += 1;
+            gruplanmis[key].toplamKilo += u.kilo;
+        });
+
+        let ozetTbody = document.getElementById('ozetUrunListesi');
+        if(Object.keys(gruplanmis).length === 0) {
+            ozetTbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: #64748b; background: white;">Ürün bekleniyor...</td></tr>`;
+            document.getElementById('toplamParcaSayisi').innerText = "0";
+            document.getElementById('toplamKiloMiktari').innerText = "0";
+            return;
+        }
+
+        ozetTbody.innerHTML = "";
+        let toplamP = 0;
+        let toplamK = 0;
+
+        for(let key in gruplanmis) {
+            let item = gruplanmis[key];
+            toplamP += item.adet;
+            toplamK += item.toplamKilo;
+            ozetTbody.innerHTML += `
+                <tr>
+                    <td><strong>${item.isim}</strong></td>
+                    <td>${item.en}</td>
+                    <td>${item.kalinlik}</td>
+                    <td>${item.adet} Parça</td>
+                    <td><strong>${item.toplamKilo.toLocaleString()} kg</strong></td>
+                </tr>
+            `;
+        }
+
+        document.getElementById('toplamParcaSayisi').innerText = toplamP;
+        document.getElementById('toplamKiloMiktari').innerText = toplamK.toLocaleString();
+    }
+
+    function listeyiOnaylaSoruSor() {
+        if(aktifSevkiyat.urunler.length === 0) {
+            gosterUyari("Onaylanacak ürün bulunmuyor!");
+            return;
+        }
+
+        gosterOnaySoru("Son kontrolleri yaptın mı?", function(onaylandi) {
+            let msgBox = document.getElementById('onayMesaji');
+            msgBox.style.display = 'block';
+            if(onaylandi) {
+                aktifSevkiyat.onaylandiMi = true;
+                msgBox.style.color = 'var(--success)';
+                msgBox.innerText = "✓ Liste başarıyla onaylandı!";
+            } else {
+                aktifSevkiyat.onaylandiMi = false;
+                msgBox.style.color = 'var(--warning)';
+                msgBox.innerText = "⚠ Onay iptal edildi, lütfen listeyi tekrar kontrol edin.";
+            }
+        });
+    }
+
+    // KAYDET VE BİTİR (FIRESTORE / LOCALSTORAGE)
+    function yuklemeyiBitir() {
+        bilgileriGuncelle();
+        if(!aktifSevkiyat.firma || !aktifSevkiyat.plaka || !aktifSevkiyat.temsilci) {
+            gosterUyari("Lütfen 1. adımdaki yükleme bilgilerini (Firma, Plaka ve Temsilci) eksiksiz doldurun!");
+            window.scrollTo({top: 0, behavior: 'smooth'});
+            return;
+        }
+        if(aktifSevkiyat.urunler.length === 0) {
+            gosterUyari("Lütfen en az bir ürün ekleyin!");
+            return;
+        }
+        if(!aktifSevkiyat.onaylandiMi) {
+            gosterUyari("Lütfen kaydetmeden önce 3. adımdan 'Listeyi Onaylıyorum' butonuna basarak son kontrolleri yapın!");
+            window.scrollTo({top: document.getElementById('bolum-ozet').offsetTop, behavior: 'smooth'});
+            return;
+        }
+
+        if(secilenDosyaObjeleri.length === 0) {
+            gosterUyari("Lütfen en az 1 adet fotoğraf çekin veya dosyadan seçin!");
+            return;
+        }
+
+        gosterOnaySoru("Yüklemeyi bitirmek ve sevkiyatı kaydetmek istediğinize emin misiniz?", function(onaylandi) {
+            if(!onaylandi) return;
+
+            let kayitObjesi = {
+                firma: aktifSevkiyat.firma,
+                plaka: aktifSevkiyat.plaka,
+                temsilci: aktifSevkiyat.temsilci,
+                urunler: aktifSevkiyat.urunler,
+                fotolar: secilenDosyaObjeleri,
+                tarih: new Date().toLocaleString('tr-TR'),
+                timestamp: Date.now(),
+                acildiMi: false
+            };
+
+            const btn = document.getElementById('btnKaydet');
+            btn.disabled = true;
+            btn.innerText = "Kaydediliyor...";
+
+            if (isFirebaseActive && db) {
+                // CANLI FİRESTORE KAYDI
+                db.collection("sevkiyatGecmisi").add(kayitObjesi).then(() => {
+                    gosterUyari("Sevkiyat başarıyla canlı veritabanına kaydedildi!", "Başarılı");
+                    formuSifirla();
+                }).catch((err) => {
+                    console.error("Firebase kaydetme hatası:", err);
+                    gosterUyari("Firebase'e kaydedilirken bir hata oluştu: " + err.message);
+                }).finally(() => {
+                    btn.disabled = false;
+                    btn.innerText = "Yüklemeyi Bitir ve Canlı Kaydet";
+                });
+            } else {
+                // YEREL LOCALSTORAGE KAYDI
+                let gecmis = JSON.parse(localStorage.getItem('sevkiyatGecmisi') || '[]');
+                gecmis.unshift(kayitObjesi);
+                localStorage.setItem('sevkiyatGecmisi', JSON.stringify(gecmis));
+                
+                gosterUyari("Sevkiyat yerel hafızaya kaydedildi!");
+                formuSifirla();
+                offlineModaGec();
+                btn.disabled = false;
+                btn.innerText = "Yüklemeyi Bitir ve Canlı Kaydet";
+            }
+        });
+    }
+
+    function formuSifirla() {
+        aktifSevkiyat = { firma: "", plaka: "", temsilci: "", urunler: [], fotolar: [], tarih: "", onaylandiMi: false };
+        secilenDosyaObjeleri = [];
+        document.getElementById('firmaAdi').value = "";
+        document.getElementById('plaka').value = "";
+        document.getElementById('temsilciSecim').value = "";
+        document.getElementById('manuelTemsilci').value = "";
+        document.getElementById('manuelTemsilciKutusu').style.display = "none";
+        document.getElementById('onayMesaji').style.display = "none";
+        dosyaListesiniGuncelle();
+        bilgileriGuncelle();
+        listeleriGuncelle();
+    }
+
+    // RAPORLARI EKRANA BASMA (CANLI SYNC UYUMLU)
+    function gecmisRaporlariEkranaBas(gecmis) {
+        let container = document.getElementById('gecmisListesiContainer');
+        let genelToplamAlan = document.getElementById('genelToplamKiloYazi');
+        
+        let genelToplamKilo = 0;
+        gecmis.forEach(sev => {
+            if(sev.urunler && Array.isArray(sev.urunler)) {
+                genelToplamKilo += sev.urunler.reduce((acc, u) => acc + (u.kilo || 0), 0);
+            }
+        });
+        genelToplamAlan.innerText = genelToplamKilo.toLocaleString();
+
+        if(!gecmis || gecmis.length === 0) {
+            container.innerHTML = "<p style='color:#64748b; font-size:0.9rem;'>Henüz kaydedilmiş geçmiş bulunmuyor.</p>";
+            return;
+        }
+
+        let html = `
+            <div class="table-responsive">
+                <table class="history-table">
+                    <thead>
+                        <tr>
+                            <th>Durum</th>
+                            <th>Tarih</th>
+                            <th>Müşteri Firma</th>
+                            <th>Plaka</th>
+                            <th>Temsilci</th>
+                            <th>Parça</th>
+                            <th>Toplam KG</th>
+                            <th style="text-align: center;">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        gecmis.forEach((sev, idx) => {
+            let toplamKilo = sev.urunler.reduce((acc, u) => acc + u.kilo, 0);
+            let durumIkona = sev.acildiMi ? '<span style="color:var(--success); font-size:1.1rem; font-weight:bold;" title="İncelendi / Yazdırıldı">✓</span>' : '<span style="color:var(--warning); font-size:1.1rem;" title="Henüz İncelenmedi">⚠️</span>';
+            
+            html += `
+                <tr>
+                    <td style="text-align: center;">${durumIkona}</td>
+                    <td>${sev.tarih}</td>
+                    <td><strong>${sev.firma}</strong></td>
+                    <td>${sev.plaka}</td>
+                    <td>${sev.temsilci}</td>
+                    <td>${sev.urunler.length} Adet</td>
+                    <td><strong>${toplamKilo.toLocaleString()} kg</strong></td>
+                    <td style="text-align: center;">
+                        <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size:0.75rem;" onclick="detayGoster(${idx})">İncele</button>
+                        <button type="button" class="btn btn-warning" style="padding: 3px 8px; font-size:0.75rem;" onclick="gecmisYazdir(${idx})">Yazdır</button>
+                        <button type="button" class="btn btn-danger" style="padding: 3px 8px; font-size:0.75rem;" onclick="sevkiyatSil(${idx})">Sil</button>
+                    </td>
+                </tr>
+            `;
+        });
+
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        container.innerHTML = html;
+    }
+
+    function detayGoster(idx) {
+        let sev = canlıGecmisVeri[idx];
+        if(!sev) return;
+
+        sev.acildiMi = true;
+        
+        // Eğer Firebase aktifse Firestore'da acildiMi durumunu güncelle
+        if (isFirebaseActive && db && sev.docId) {
+            db.collection("sevkiyatGecmisi").doc(sev.docId).update({ acildiMi: true });
+        } else {
+            localStorage.setItem('sevkiyatGecmisi', JSON.stringify(canlıGecmisVeri));
+            gecmisRaporlariEkranaBas(canlıGecmisVeri);
+        }
+
+        let toplamKilo = sev.urunler.reduce((acc, u) => acc + u.kilo, 0);
+        let html = `
+            <p><strong>Tarih:</strong> ${sev.tarih}</p>
+            <p><strong>Müşteri:</strong> ${sev.firma}</p>
+            <p><strong>Plaka:</strong> ${sev.plaka}</p>
+            <p><strong>Temsilci:</strong> ${sev.temsilci}</p>
+            <h5 style="margin-top:10px;">Ürünler:</h5>
+            <ul>
+        `;
+        sev.urunler.forEach(u => {
+            let olcu = (u.en !== "-" || u.kalinlik !== "-") ? ` (${u.en} / ${u.kalinlik})` : "";
+            html += `<li>${u.isim}${olcu} - <strong>${u.kilo.toLocaleString()} kg</strong></li>`;
+        });
+        html += `</ul><p style="margin-top:8px;"><strong>Toplam Ağırlık:</strong> ${toplamKilo.toLocaleString()} kg</p>`;
+
+        if(sev.fotolar && sev.fotolar.length > 0) {
+            html += `<h5 style="margin-top:12px;">Yüklenen Fotoğraflar / Fişler:</h5><div class="photo-grid">`;
+            sev.fotolar.forEach(foto => {
+                html += `<img src="${foto.dataUrl}" class="photo-thumb" title="${foto.name}" onclick="orijinalFotoAc('${foto.dataUrl}')">`;
+            });
+            html += `</div>`;
+        }
+
+        document.getElementById('detayIcerik').innerHTML = html;
+        document.getElementById('detayGorunum').style.display = 'block';
+        document.getElementById('detayGorunum').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function orijinalFotoAc(url) {
+        let win = window.open();
+        win.document.write(`<img src="${url}" style="max-width:100%; height:auto;" />`);
+    }
+
+    function detayiKapat() {
+        document.getElementById('detayGorunum').style.display = 'none';
+    }
+
+    // YAZDIRMA
+    function aktifYazdirTikla() {
+        if(aktifSevkiyat.urunler.length === 0) {
+            gosterUyari("Yazdırılacak ürün bulunmuyor!");
+            return;
+        }
+        yazdirmaPenceresiAç(aktifSevkiyat.firma, aktifSevkiyat.plaka, aktifSevkiyat.temsilci, new Date().toLocaleString('tr-TR'), aktifSevkiyat.urunler);
+    }
+
+    function gecmisYazdir(idx) {
+        let sev = canlıGecmisVeri[idx];
+        if(!sev) return;
+
+        if (isFirebaseActive && db && sev.docId) {
+            db.collection("sevkiyatGecmisi").doc(sev.docId).update({ acildiMi: true });
+        }
+
+        yazdirmaPenceresiAç(sev.firma, sev.plaka, sev.temsilci, sev.tarih, sev.urunler);
+    }
+
+    function yazdirmaPenceresiAç(firma, plaka, temsilci, tarih, urunler) {
+        let toplamKilo = urunler.reduce((acc, u) => acc + u.kilo, 0);
+        document.getElementById('printHeaderInfo').innerHTML = `
+            <strong>Tarih:</strong> ${tarih}<br>
+            <strong>Müşteri Firma:</strong> ${firma || '-'}<br>
+            <strong>Araç Plakası:</strong> ${plaka || '-'}<br>
+            <strong>Temsilci:</strong> ${temsilci || '-'}
+        `;
+
+        let gruplanmis = {};
+        urunler.forEach(u => {
+            let key = u.isim + "_" + u.en + "_" + u.kalinlik;
+            if(!gruplanmis[key]) {
+                gruplanmis[key] = { isim: u.isim + (u.en !== "-" || u.kalinlik !== "-" ? " (" + u.en + " x " + u.kalinlik + ")" : ""), adet: 0, toplamKilo: 0 };
+            }
+            gruplanmis[key].adet += 1;
+            gruplanmis[key].toplamKilo += u.kilo;
+        });
+
+        let tbody = document.getElementById('printUrunTbody');
+        tbody.innerHTML = "";
+        for(let key in gruplanmis) {
+            let item = gruplanmis[key];
+            tbody.innerHTML += `<tr><td>${item.isim} (${item.adet} Parça)</td><td style="text-align: right; font-weight: bold;">${item.toplamKilo.toLocaleString()} kg</td></tr>`;
+        }
+
+        document.getElementById('printFooterInfo').innerHTML = `TOPLAM PARÇA: ${urunler.length} Adet | TOPLAM KİLO: ${toplamKilo.toLocaleString()} kg`;
+        window.print();
+    }
+
+    // SILME ISLEMLERI
+    function sevkiyatSil(idx) {
+        let sev = canlıGecmisVeri[idx];
+        if(!sev) return;
+
+        gosterOnaySoru("Bu sevkiyat kaydını silmek istediğinize emin misiniz?", function(onaylandi) {
+            if(onaylandi) {
+                if (isFirebaseActive && db && sev.docId) {
+                    db.collection("sevkiyatGecmisi").doc(sev.docId).delete().then(() => {
+                        detayiKapat();
+                        gosterUyari("Sevkiyat kaydı canlı veritabanından silindi.");
+                    });
+                } else {
+                    canlıGecmisVeri.splice(idx, 1);
+                    localStorage.setItem('sevkiyatGecmisi', JSON.stringify(canlıGecmisVeri));
+                    detayiKapat();
+                    gecmisRaporlariEkranaBas(canlıGecmisVeri);
+                    gosterUyari("Sevkiyat kaydı silindi.");
+                }
+            }
+        }, "btn-danger", "Evet, Sil");
+    }
+
+    function sevkiyatlarıTemizleSorusu() {
+        if(canlıGecmisVeri.length === 0) {
+            gosterUyari("Temizlenecek geçmiş sevkiyat bulunmuyor.");
+            return;
+        }
+
+        gosterOnaySoru("Sevkiyat listesini siliyorsunuz!", function(onaylandi) {
+            if(onaylandi) {
+                sonSansSorusu();
+            }
+        }, "btn-danger", "Devam Et");
+    }
+function sonSansSorusu() {
+        gosterOnaySoru("Son şans! Tüm geçmiş sevkiyat kayıtları kalıcı olarak silinecek. Emin misiniz?", function(onaylandi) {
+            if(onaylandi) {
+                if (isFirebaseActive && db) {
+                    // Tüm dokümanları tek tek sil
+                    let batch = db.batch();
+                    canlıGecmisVeri.forEach(item => {
+                        if(item.docId) {
+                            let ref = db.collection("sevkiyatGecmisi").doc(item.docId);
+                            batch.delete(ref);
+                        }
+                    });
+                    batch.commit().then(() => {
+                        detayiKapat();
+                        gosterUyari("Tüm geçmiş sevkiyatlar canlı veritabanından başarıyla temizlendi.");
+                    });
+                } else {
+                    localStorage.removeItem('sevkiyatGecmisi');
+                    canlıGecmisVeri = [];
+                    gecmisRaporlariEkranaBas(canlıGecmisVeri);
+                    detayiKapat();
+                    gosterUyari("Tüm geçmiş sevkiyatlar başarıyla temizlendi.");
+                }
+            }
+        }, "btn-danger", "Evet, Hepsini Sil");
+    }
+</script>
