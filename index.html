@@ -559,7 +559,7 @@
         if (secilenDosyaObjeleri.length > 0) {
             alan.style.display = "block";
             secilenDosyaObjeleri.forEach((dosya, idx) => {
-                ul.innerHTML += `<li>${dosya.name} <button type="button" onclick="dosyaSil(${idx})" style="color:red; border:none; background:none; cursor:pointer; font-weight:bold; margin-left:5px;">[Kaldır]</button></li>`;
+                ul.innerHTML += `<li style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;"><img src="${dosya.dataUrl}" style="width: 36px; height: 36px; object-fit: cover; border-radius: 4px; border: 1px solid #ccc;"> <span>${dosya.name}</span> <button type="button" onclick="dosyaSil(${idx})" style="color:red; border:none; background:none; cursor:pointer;">[Kaldır]</button></li>`;
             });
         } else {
             alan.style.display = "none";
