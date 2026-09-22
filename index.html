@@ -1109,11 +1109,13 @@ function sonSansSorusu() {
                 if (isFirebaseActive && db) {
                     // Tüm dokümanları tek tek sil
                     let batch = db.batch();
-                    canlıGecmisVeri.forEach(item => {
-                        if(item.docId) {
-                            let ref = db.collection("sevkiyatGecmisi").doc(item.docId);
-                            batch.delete(ref);
-                        }
+                   canliGecmisVeri.forEach(item => {
+    let idVerisi = item.docId || item.id;
+    if(idVerisi) {
+        let ref = db.collection("sevkiyatGecmisi").doc(idVerisi);
+        batch.delete(ref);
+    }
+});
                     });
                     batch.commit().then(() => {
                         detayiKapat();
