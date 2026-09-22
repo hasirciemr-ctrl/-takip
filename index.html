@@ -1118,6 +1118,8 @@ function sonSansSorusu() {
                     batch.commit().then(() => {
                         detayiKapat();
                         gosterUyari("Tüm geçmiş sevkiyatlar canlı veritabanından başarıyla temizlendi.");
+                        canliGecmisVeri = [];
+gecmisRaporlariEkranaBas(canliGecmisVeri);
                     });
                 } else {
                     localStorage.removeItem('sevkiyatGecmisi');
