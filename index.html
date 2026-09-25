@@ -368,13 +368,13 @@
     <div class="section-box" style="margin-top: 25px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; flex-wrap: wrap; gap: 10px;">
             <h3 style="margin: 0; border: none; padding: 0;">5. Günlük Sevkiyat ve Geçmiş Raporlar</h3>
-           <div style="display: flex; align-items: center; gap: 10px;">
-    <!-- Tarih Seçici -->
-    <input type="date" id="gecmisTarihFiltresi" style="padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.85rem; background: #fff;" onchange="tariheGoreFiltrele()">
-    
-    <div style="background: #e2e8f0; padding: 5px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; color: #1e293b;">
-        GENEL TOPLAM: <span id="genelToplamKiloYazisi">0</span> kg
-    </div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+                <div style="background: #e2e8f0; padding: 5px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: bold; color: #1e293b;">
+                    GENEL TOPLAM: <span id="genelToplamKiloYazi">0</span> kg
+                </div>
+                <button type="button" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.85rem;" onclick="sevkiyatlarıTemizleSorusu()">Tümünü Temizle</button>
+            </div>
+        </div>
     <button type="button" class="btn btn-danger" style="padding: 6px 12px; font-size: 0.85rem;" onclick="sevkiyatlarıTemizleSorusu()">Tümünü Temizle</button>
 </div>
 
