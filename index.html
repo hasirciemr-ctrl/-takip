@@ -1133,19 +1133,4 @@ gecmisRaporlariEkranaBas(canliGecmisVeri);
             }
         }, "btn-danger", "Evet, Hepsini Sil");
     }
-    function tariheGoreFiltrele() {
-    let secilenTarih = document.getElementById("gecmisTarihFiltresi").value;
-    if (!secilenTarih) {
-        // Tarih seçilmemişse tüm listeyi göster
-        gecmisRaporlariEkranaBas(canliGecmisVeri);
-        return;
-    }
-    
-    // Yıl-Ay-Gün formatını uygulamanın formatına çevirip filtrele
-    let [yil, ay, gun] = secilenTarih.split("-");
-    let hedefFormat = `${gun}.${ay}.${yil}`;
-    
-    let filtrelenmis = canliGecmisVeri.filter(item => item.tarih && item.tarih.includes(hedefFormat));
-    gecmisRaporlariEkranaBas(filtrelenmis);
-}
 </script>
